@@ -6,10 +6,19 @@
   <title>Gestor de Enlaces y Códigos QR</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
-  <!-- Importamos las credenciales desde el archivo .js externo -->
   <script src="config.js"></script>
 </head>
 <body class="bg-gray-100 min-h-screen">
+
+  <!-- PANTALLA DE CARGA / REDIRECCIÓN PÚBLICA -->
+  <div id="redirectSection" class="hidden flex flex-col items-center justify-center min-h-screen">
+    <div class="p-8 bg-white rounded-lg shadow-md text-center max-w-sm w-full">
+      <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+      <h2 class="text-xl font-bold text-gray-800 mb-2">Redireccionando...</h2>
+      <p class="text-gray-600 text-sm mb-4">Por favor espera un momento.</p>
+      <a id="manualLink" href="#" class="text-blue-600 underline text-xs hidden">Haz clic aquí si no redirige automáticamente</a>
+    </div>
+  </div>
 
   <!-- VISTA DE LOGIN -->
   <div id="loginSection" class="flex items-center justify-center min-h-screen">
@@ -18,11 +27,11 @@
       <form onsubmit="handleLogin(event)" class="space-y-4">
         <div>
           <label class="block text-sm font-medium text-gray-700">Usuario</label>
-          <input type="text" id="userInput" required class="w-full mt-1 p-2 border rounded focus:ring-blue-500 focus:border-blue-500">
+          <input type="text" id="userInput" required class="w-full mt-1 p-2 border rounded focus:ring-blue-500">
         </div>
         <div>
           <label class="block text-sm font-medium text-gray-700">Contraseña</label>
-          <input type="password" id="passInput" required class="w-full mt-1 p-2 border rounded focus:ring-blue-500 focus:border-blue-500">
+          <input type="password" id="passInput" required class="w-full mt-1 p-2 border rounded focus:ring-blue-500">
         </div>
         <p id="loginError" class="text-red-500 text-sm hidden">Usuario o contraseña incorrectos</p>
         <button type="submit" class="w-full bg-blue-600 text-white py-2 rounded font-semibold hover:bg-blue-700">Ingresar</button>
@@ -44,8 +53,14 @@
         <input type="url" id="targetUrl" placeholder="URL Destino (https://...)" required class="p-2 border rounded">
         <input type="text" id="shortCode" placeholder="Código corto (Opcional)" class="p-2 border rounded">
         <input type="text" id="notes" placeholder="Notas o Descripción" class="p-2 border rounded">
-        <button type="submit" class="md:col-span-3 bg-green-600 text-white py-2 rounded font-semibold hover:bg-green-700">Guardar en Google Sheets y Generar</button>
+        <button type="submit" class="md:col-span-3 bg-green-600 text-white py-2 rounded font-semibold hover:bg-green-700">Guardar y Generar</button>
       </form>
+    </div>
+
+    <!-- CONTROLES MASIVOS -->
+    <div class="flex justify-between items-center mb-4">
+      <button onclick="deleteSelectedLinks()" class="bg-red-600 text-white px-4 py-2 rounded font-semibold hover:bg-red-700 text-sm shadow">Eliminar Seleccionados</button>
+      <span id="selectedCount" class="text-gray-600 text-sm">0 elementos seleccionados</span>
     </div>
 
     <!-- TABLA DE GESTIÓN -->
@@ -53,6 +68,9 @@
       <table class="w-full text-left border-collapse">
         <thead>
           <tr class="bg-gray-50 border-b">
+            <th class="p-4 w-12 text-center">
+              <input type="checkbox" id="selectAll" onclick="toggleSelectAll(this)" class="w-4 h-4 text-blue-600 rounded">
+            </th>
             <th class="p-4">Código Corto</th>
             <th class="p-4">URL Destino</th>
             <th class="p-4">Clics</th>
@@ -61,9 +79,7 @@
             <th class="p-4">Acciones</th>
           </tr>
         </thead>
-        <tbody id="linksTableBody">
-          <!-- Datos dinámicos -->
-        </tbody>
+        <tbody id="linksTableBody"></tbody>
       </table>
     </div>
   </div>
@@ -79,11 +95,45 @@
   </div>
 
   <script>
-    let isLoggedIn = localStorage.getItem("is_logged_in") === "true";
+    const baseUrl = window.location.href.split('?')[0];
+    const urlParams = new URLSearchParams(window.location.search);
+    const redirectCode = urlParams.get('r');
 
     window.onload = () => {
-      if (isLoggedIn) showAdminPanel();
+      // Si la URL contiene ?r=codigo, ejecuta la redirección inmediata
+      if (redirectCode) {
+        handleRedirect(redirectCode);
+      } else {
+        const isLoggedIn = localStorage.getItem("is_logged_in") === "true";
+        if (isLoggedIn) showAdminPanel();
+      }
     };
+
+    async function handleRedirect(code) {
+      document.getElementById("loginSection").classList.add("hidden");
+      document.getElementById("redirectSection").classList.remove("hidden");
+
+      try {
+        const response = await fetch(`${CONFIG.SCRIPT_URL}?r=${encodeURIComponent(code)}`);
+        const res = await response.json();
+
+        if (res.success && res.targetUrl) {
+          let dest = res.targetUrl.trim();
+          if (!dest.startsWith('http://') && !dest.startsWith('https://')) {
+            dest = 'https://' + dest;
+          }
+          document.getElementById("manualLink").href = dest;
+          document.getElementById("manualLink").classList.remove("hidden");
+          window.location.replace(dest);
+        } else {
+          alert("El enlace acortado no existe.");
+          window.location.href = baseUrl;
+        }
+      } catch (err) {
+        console.error(err);
+        alert("Error de conexión al procesar el enlace.");
+      }
+    }
 
     async function apiRequest(payload) {
       try {
@@ -106,7 +156,6 @@
       const pass = document.getElementById("passInput").value;
 
       if (user === CONFIG.ADMIN_USER && pass === CONFIG.ADMIN_PASS) {
-        isLoggedIn = true;
         localStorage.setItem("is_logged_in", "true");
         showAdminPanel();
       } else {
@@ -116,7 +165,6 @@
 
     function logout() {
       localStorage.removeItem("is_logged_in");
-      isLoggedIn = false;
       location.reload();
     }
 
@@ -131,17 +179,23 @@
       if (res.success) {
         const tbody = document.getElementById("linksTableBody");
         tbody.innerHTML = "";
+        document.getElementById("selectAll").checked = false;
+        updateSelectedCount();
+
         res.data.forEach(link => {
-          const redirectUrl = `${CONFIG.SCRIPT_URL}?r=${link.shortCode}`;
+          const shortUrl = `${baseUrl}?r=${link.shortCode}`;
           tbody.innerHTML += `
             <tr class="border-b hover:bg-gray-50">
-              <td class="p-4 font-mono text-blue-600"><a href="${redirectUrl}" target="_blank">${link.shortCode}</a></td>
+              <td class="p-4 text-center">
+                <input type="checkbox" value="${link.id}" onclick="updateSelectedCount()" class="link-checkbox w-4 h-4 text-blue-600 rounded">
+              </td>
+              <td class="p-4 font-mono text-blue-600"><a href="${shortUrl}" target="_blank">${link.shortCode}</a></td>
               <td class="p-4 truncate max-w-xs">${link.targetUrl}</td>
               <td class="p-4 font-semibold">${link.clicks}</td>
               <td class="p-4">${link.notes}</td>
               <td class="p-4 space-x-2">
-                <button onclick="showQR('${redirectUrl}', '${link.shortCode}')" class="bg-indigo-500 text-white px-3 py-1 rounded text-sm mb-1">Ver QR</button>
-                <button onclick="downloadQRDirect('${redirectUrl}', '${link.shortCode}')" class="bg-emerald-600 text-white px-3 py-1 rounded text-sm">Descargar PNG</button>
+                <button onclick="showQR('${shortUrl}', '${link.shortCode}')" class="bg-indigo-500 text-white px-3 py-1 rounded text-sm mb-1">Ver QR</button>
+                <button onclick="downloadQRDirect('${shortUrl}', '${link.shortCode}')" class="bg-emerald-600 text-white px-3 py-1 rounded text-sm">Descargar PNG</button>
               </td>
               <td class="p-4 space-x-2">
                 <button onclick="editLink('${link.id}', '${link.targetUrl}', '${link.notes}')" class="bg-yellow-500 text-white px-2 py-1 rounded text-sm">Editar</button>
@@ -150,6 +204,29 @@
             </tr>
           `;
         });
+      }
+    }
+
+    function toggleSelectAll(masterCheckbox) {
+      const checkboxes = document.querySelectorAll('.link-checkbox');
+      checkboxes.forEach(cb => cb.checked = masterCheckbox.checked);
+      updateSelectedCount();
+    }
+
+    function updateSelectedCount() {
+      const selected = document.querySelectorAll('.link-checkbox:checked').length;
+      document.getElementById('selectedCount').innerText = `${selected} elemento(s) seleccionado(s)`;
+    }
+
+    async function deleteSelectedLinks() {
+      const checkboxes = document.querySelectorAll('.link-checkbox:checked');
+      if (checkboxes.length === 0) return alert("Selecciona al menos un enlace.");
+
+      if (confirm(`¿Eliminar los ${checkboxes.length} enlaces seleccionados?`)) {
+        for (const cb of checkboxes) {
+          await apiRequest({ action: "delete", id: cb.value });
+        }
+        loadLinks();
       }
     }
 
@@ -180,7 +257,7 @@
     }
 
     async function deleteLink(id) {
-      if (confirm("¿Estás seguro de eliminar este enlace?")) {
+      if (confirm("¿Eliminar este enlace?")) {
         await apiRequest({ action: "delete", id });
         loadLinks();
       }
@@ -189,21 +266,17 @@
     function showQR(url, code) {
       const container = document.getElementById("qrcode");
       container.innerHTML = "";
-      const qrObj = new QRCode(container, { text: url, width: 180, height: 180 });
+      new QRCode(container, { text: url, width: 180, height: 180 });
       
-      // Agregar botón de descarga rápido también dentro del modal
       const dlContainer = document.getElementById("modalDownloadContainer");
       dlContainer.innerHTML = `<button onclick="downloadQRDirect('${url}', '${code}')" class="mt-3 bg-emerald-600 text-white px-4 py-2 rounded text-sm font-semibold hover:bg-emerald-700 w-full">Descargar QR en PNG</button>`;
       
       document.getElementById("qrModal").classList.remove("hidden");
     }
 
-    // Función auxiliar para generar y descargar el PNG al instante
     function downloadQRDirect(url, code) {
-      // Creamos un contenedor temporal invisible para renderizar el QR en un elemento canvas
       const tempDiv = document.createElement("div");
       document.body.appendChild(tempDiv);
-      
       new QRCode(tempDiv, { text: url, width: 300, height: 300 });
 
       setTimeout(() => {
@@ -218,7 +291,7 @@
           document.body.removeChild(downloadLink);
         }
         document.body.removeChild(tempDiv);
-      }, 100); // Pequeño delay de seguridad para asegurar el renderizado del canvas
+      }, 100);
     }
 
     function closeQrModal() {
